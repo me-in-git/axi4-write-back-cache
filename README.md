@@ -17,13 +17,15 @@
 make test      # needs icarus verilog 12+
 ```
 
-The testbench fills a set, checks that nothing gets evicted while a way is free, forces an eviction of the LRU dirty line, and checks memory contents after the write-back (21 checks).
+The testbench first runs directed checks: fill a set, make sure nothing is evicted while a way is free, force an eviction of the LRU dirty line and check memory after the write-back. Then 2000 random reads/writes over 3 sets x 6 tags (so lines keep getting evicted) are checked against a software copy of memory. A monitor also checks that ARVALID drops after the address handshake.
 
 ```
 PASS: 4 lines in a 4-way set: no write-back
 PASS: exactly one write-back burst
 PASS: dirty line written back @0x1004
 PASS: re-read evicted line @0x1004 from memory
+random phase: 976 reads, 1024 writes, 1348 hits, 496 write-backs
+PASS: random phase: every read matched the memory model
 === CACHE_TEST: 0 error(s) ===
 ```
 

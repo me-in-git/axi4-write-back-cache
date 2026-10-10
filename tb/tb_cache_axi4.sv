@@ -54,12 +54,22 @@ module tb_cache_axi4;
         if (rvalid && rready && rlast) ar_open = 0;
     end
 
-    initial #100000 begin
+    initial #2000000 begin
         $display("=== TIMEOUT ===");
         $finish;
     end
 
     integer errors = 0;
+
+    // random phase: 3 sets x 6 tags x 4 words; 6 tags > 4 ways, so lines get evicted
+    localparam int RN_OPS = 2000;
+    logic [31:0] model [72];                    // expected value per word slot
+    int          rn_bad = 0, rn_reads = 0, rn_writes = 0, rn_hits = 0;
+
+    // k in 0..71 -> tag 1..6, set 5..7 (not touched by the directed part), word 0..3
+    function automatic logic [31:0] rn_addr(input int k);
+        rn_addr = ((k / 12 + 1) << 10) | ((k / 4 % 3 + 5) << 4) | ((k % 4) << 2);
+    endfunction
 
     task check(input logic ok, input string what);
         if (ok) $display("PASS: %s", what);
@@ -143,6 +153,48 @@ module tb_cache_axi4;
         cpu_xfer(0, 32'h0000_1004, 0, hit_out, rd_out);
         check(rd_out === 32'hDEAD_BEEF && hit_out === 1'b0, "re-read evicted line @0x1004 from memory");
 
+        // random reads/writes against a software copy of memory
+        begin
+            int k, op, wb0;
+            logic [31:0] ad, wd;
+            for (k = 0; k < 72; k++) begin
+                ad = rn_addr(k);
+                mem.mem[ad >> 2] = $urandom;
+                model[k] = mem.mem[ad >> 2];
+            end
+            wb0 = wb_count;
+            for (int n = 0; n < RN_OPS; n++) begin
+                k  = $urandom_range(0, 71);
+                ad = rn_addr(k);
+                op = $urandom_range(0, 1);
+                if (op) begin
+                    wd = $urandom;
+                    cpu_xfer(1, ad, wd, hit_out, rd_out);
+                    model[k] = wd;
+                    rn_writes++;
+                end else begin
+                    cpu_xfer(0, ad, 0, hit_out, rd_out);
+                    if (rd_out !== model[k]) begin
+                        if (rn_bad < 5) $display("FAIL: random read @%h got %h exp %h", ad, rd_out, model[k]);
+                        rn_bad++;
+                    end
+                    rn_reads++;
+                end
+                if (hit_out) rn_hits++;
+            end
+            // read every word back once more
+            for (k = 0; k < 72; k++) begin
+                ad = rn_addr(k);
+                cpu_xfer(0, ad, 0, hit_out, rd_out);
+                if (rd_out !== model[k]) begin
+                    if (rn_bad < 5) $display("FAIL: final read @%h got %h exp %h", ad, rd_out, model[k]);
+                    rn_bad++;
+                end
+            end
+            $display("random phase: %0d reads, %0d writes, %0d hits, %0d write-backs",
+                     rn_reads, rn_writes, rn_hits, wb_count - wb0);
+            check(rn_bad == 0, "random phase: every read matched the memory model");
+        end
         check(ar_errors == 0, "arvalid low while a read burst is outstanding");
         $display("=== CACHE_TEST: %0d error(s) ===", errors);
         $finish;
