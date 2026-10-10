@@ -45,6 +45,15 @@ module tb_cache_axi4;
     always @(posedge clk)
         if (awvalid && awready) wb_count = wb_count + 1;
 
+    // protocol check: no new ARVALID between an AR handshake and its RLAST
+    logic   ar_open = 0;
+    integer ar_errors = 0;
+    always @(posedge clk) begin
+        if (ar_open && arvalid) ar_errors = ar_errors + 1;
+        if (arvalid && arready) ar_open = 1;
+        if (rvalid && rready && rlast) ar_open = 0;
+    end
+
     initial #100000 begin
         $display("=== TIMEOUT ===");
         $finish;
@@ -134,6 +143,7 @@ module tb_cache_axi4;
         cpu_xfer(0, 32'h0000_1004, 0, hit_out, rd_out);
         check(rd_out === 32'hDEAD_BEEF && hit_out === 1'b0, "re-read evicted line @0x1004 from memory");
 
+        check(ar_errors == 0, "arvalid low while a read burst is outstanding");
         $display("=== CACHE_TEST: %0d error(s) ===", errors);
         $finish;
     end

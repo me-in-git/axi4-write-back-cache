@@ -81,6 +81,7 @@ module cache_axi4 #(
     logic               victim_dirty_q;
     logic [TAG_W-1:0]   victim_tag_q;
     logic               ev_aw_done;    // AW handshake completed this eviction
+    logic               rf_ar_done;    // AR handshake completed this refill
     logic               req_pending;   // a request has been accepted, result not yet returned
     logic               req_hit_q;     // registered hit/miss result
     logic [31:0]        req_rdata_q;   // registered read data
@@ -229,7 +230,7 @@ module cache_axi4 #(
                 arlen   = LINE_WORDS-1;
                 arsize  = 3'b010;
                 arburst = 2'b01;
-                arvalid = 1'b1;
+                arvalid = !rf_ar_done;
                 rready  = 1'b1;
                 if (rvalid && rready && rlast)
                     nstate = S_COMMIT;
@@ -392,6 +393,17 @@ module cache_axi4 #(
         else begin
             wr_cnt <= 4'd0;
         end
+    end
+
+    // AR handshake tracking: ARVALID only until the address is accepted
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            rf_ar_done <= 1'b0;
+        else if (state == S_REFILL) begin
+            if (arvalid && arready) rf_ar_done <= 1'b1;
+        end
+        else
+            rf_ar_done <= 1'b0;
     end
 
     // AW handshake tracking: W data must be delayed one cycle after AWVALID
